@@ -1,5 +1,5 @@
 use crate::grammar::Rules;
-use std::vec::{self, Vec};
+use std::vec::{Vec};
 pub type LlamaGrammarElement = (u8, Rules);
 
 #[derive(Clone, Debug)]
@@ -14,18 +14,16 @@ pub struct LlamaGrammar {
     pub stacks: Vec<Vec<LlamaGrammarElement>>,
 }
 
+#[allow(dead_code)]
 impl LlamaGrammar {
     fn is_end_of_sequence(pos: &LlamaGrammarElement) -> bool {
-        match pos.1 {
-            Rules::End | Rules::Alt => true,
-            _ => false,
-        }
+        matches!(pos.1, Rules::End | Rules::Alt)
     }
 
     // transforms a grammar pushdown stack into N possible stacks, all ending
     // at a character range (terminal element)
     pub fn advance_stack(
-        (index, last_pos_index): (usize, usize),
+        (index, _last_pos_index): (usize, usize),
         rules: &Vec<Vec<LlamaGrammarElement>>,
         stack: &mut Vec<LlamaGrammarElement>,
         new_stacks: &mut Vec<Vec<LlamaGrammarElement>>,
@@ -35,8 +33,8 @@ impl LlamaGrammar {
             return; // return new_stacks;
         }
 
-        let mut pos_index = stack.len() - 1;
-        let mut pos: (u8, Rules) = stack[pos_index].clone();
+        let pos_index = stack.len() - 1;
+        let pos: (u8, Rules) = stack[pos_index].clone();
 
         match pos.1 {
             Rules::RuleRef => {
@@ -46,18 +44,18 @@ impl LlamaGrammar {
                 loop {
                     // make a new stack with the current stack but without the last element
                     // use drop_last() instead of clone() to avoid copying the whole stack
-                    let num = 0;
+                    let _num = 0;
                     let mut new_stack = stack.clone();
                     new_stack.pop();
 
                     if let Some(next_pos) = rules[index].get(1) {
-                        if !LlamaGrammar::is_end_of_sequence(&next_pos) {
+                        if !LlamaGrammar::is_end_of_sequence(next_pos) {
                             new_stack.push(next_pos.clone());
                         }
                     }
 
                     if let Some(next_subpos) = subpos.get(idx) {
-                        if !LlamaGrammar::is_end_of_sequence(&next_subpos) {
+                        if !LlamaGrammar::is_end_of_sequence(next_subpos) {
                             new_stack.push(next_subpos.clone());
                         }
                     }
@@ -154,7 +152,7 @@ term  ::= [0-9]+";
 
         let mut parser = Parser::new(data);
 
-        while let Some(ch) = parser.input.chars().next() {
+        while let Some(_) = parser.input.chars().next() {
             parser.parse_rule();
         }
 

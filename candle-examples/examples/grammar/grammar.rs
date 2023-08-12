@@ -8,6 +8,7 @@ pub struct Parser<'a> {
     pub rules: Vec<Vec<(u8, Rules)>>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Rules {
     End = 0,
@@ -19,6 +20,7 @@ pub enum Rules {
     CharAlt = 6,
 }
 
+#[allow(dead_code)]
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         Parser {
@@ -294,7 +296,7 @@ ws    ::= [ \t\n]*";
 
         let mut parser = Parser::new(data);
 
-        while let Some(ch) = parser.input.chars().next() {
+        while let Some(_) = parser.input.chars().next() {
             parser.parse_rule();
         }
 
@@ -366,19 +368,16 @@ ws    ::= [ \t\n]*";
             (45, Char),
             (122, Char),
             (48, Char),
-            // (45, Char),
             (57, Char),
             (95, Char),
             (10, RuleRef),
             (0, Alt),
             (0, End),
             (48, Char),
-            // (45, Char),
             (57, Char),
             (11, RuleRef),
             (0, Alt),
             (48, Char),
-            // (45, Char),
             (57, Char),
             (0, End),
             (32, Char),
