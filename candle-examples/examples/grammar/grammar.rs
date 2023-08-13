@@ -1,15 +1,18 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 use std::vec::Vec;
 
+pub type GrammarElement = (Rules, u8);
+
+
 #[derive(Clone, Debug)]
 pub struct Parser<'a> {
     pub input: &'a str,
     pub symbol_ids: BTreeMap<String, u32>,
-    pub rules: Vec<Vec<(u8, Rules)>>,
+    pub rules: Vec<Vec<GrammarElement>>,
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq, Copy)]
 pub enum Rules {
     End = 0,
     Alt = 1,
@@ -18,6 +21,22 @@ pub enum Rules {
     CharNot = 4,
     CharRngUpper = 5,
     CharAlt = 6,
+}
+
+// implement Debug for Rules and print a number instead of the enum
+impl std::fmt::Debug for Rules {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let num = match self {
+            Rules::End => 0,
+            Rules::Alt => 1,
+            Rules::RuleRef => 2,
+            Rules::Char => 3,
+            Rules::CharNot => 4,
+            Rules::CharRngUpper => 5,
+            Rules::CharAlt => 6,
+        };
+        write!(f, "{}", num)
+    }
 }
 
 #[allow(dead_code)]
@@ -30,7 +49,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn add_rule(&mut self, rule: Vec<(u8, Rules)>, rule_id: usize) {
+    fn add_rule(&mut self, rule: Vec<GrammarElement>, rule_id: usize) {
         // check if len is less then or equal to rule_id
         if self.rules.len() <= rule_id {
             self.rules.resize(rule_id + 1, vec![]);
@@ -116,7 +135,7 @@ impl<'a> Parser<'a> {
         let end_pos = 0;
         while let Some(ch) = self.input.chars().next() {
             if ch == '|' {
-                rule.push((0, Rules::Alt));
+                rule.push((Rules::Alt, 0));
                 // move input forward 1 char
                 self.input = &self.input[1..];
                 self.parse_space(true);
@@ -125,7 +144,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        rule.push((0, Rules::End));
+        rule.push((Rules::End, 0));
         self.add_rule(rule, rule_id);
         self.input = &self.input[end_pos..];
     }
@@ -133,7 +152,7 @@ impl<'a> Parser<'a> {
     fn parse_sequence(
         &mut self,
         rule_name: &str,
-        out_element: &mut Vec<(u8, Rules)>,
+        out_element: &mut Vec<GrammarElement>,
         is_nested: bool,
     ) {
         // println!("======= parse_sequence =======");
@@ -150,7 +169,7 @@ impl<'a> Parser<'a> {
                             utf_char.push(ch);
                             let byte_len = utf_char.len();
                             self.input = &self.input[byte_len..];
-                            out_element.push((ch as u8, Rules::Char));
+                            out_element.push((Rules::Char, ch as u8));
                         } else {
                             break;
                         }
@@ -174,10 +193,10 @@ impl<'a> Parser<'a> {
                             utf_char.push(ch);
                             let mut byte_len = utf_char.len();
                             if ch as u8 == 48 {
-                                byte_len += 1; // TODO: handle special cases in one place 
+                                byte_len += 1; // TODO: handle special cases in one place
                             }
                             self.input = &self.input[byte_len..];
-                            out_element.push((ch as u8, Rules::Char));
+                            out_element.push((Rules::Char, ch as u8));
                         } else {
                             break;
                         }
@@ -192,7 +211,7 @@ impl<'a> Parser<'a> {
                     let ref_rule_id: u32 = self.get_symbol_id(new_name_end);
                     self.parse_space(is_nested);
                     last_sym_start = out_element.len();
-                    out_element.push((ref_rule_id.try_into().unwrap(), Rules::RuleRef));
+                    out_element.push((Rules::RuleRef, ref_rule_id.try_into().unwrap()));
                 }
                 '(' => {
                     // grouping
@@ -202,7 +221,7 @@ impl<'a> Parser<'a> {
                     let sub_rule_id = self.generate_symbol_id(rule_name);
                     self.parse_alternative(rule_name, sub_rule_id as usize, true);
                     last_sym_start = out_element.len();
-                    out_element.push((sub_rule_id.try_into().unwrap(), Rules::RuleRef));
+                    out_element.push((Rules::RuleRef, sub_rule_id.try_into().unwrap()));
 
                     let new_current_char = self.input.chars().next();
                     if let Some(')') = new_current_char {
@@ -226,22 +245,22 @@ impl<'a> Parser<'a> {
                     let new_current_char = self.input.chars().next().unwrap();
                     if new_current_char == '*' || new_current_char == '+' {
                         // cause generated rule to recurse
-                        sub_rules.push((sub_rule_id as u8, Rules::RuleRef));
+                        sub_rules.push((Rules::RuleRef, sub_rule_id as u8));
                     }
                     // mark start of alternate def
-                    sub_rules.push((0, Rules::Alt));
+                    sub_rules.push((Rules::Alt, 0));
 
                     if new_current_char == '+' || new_current_char == '?' {
                         // add empty string to generated rule
                         sub_rules.extend(out_element[last_sym_start..].to_vec());
                     }
-                    sub_rules.push((0, Rules::End));
+                    sub_rules.push((Rules::End, 0));
                     // update self.rules
                     self.add_rule(sub_rules, sub_rule_id as usize);
 
                     // in original rule, replace previous symbol with reference to generated rule
                     out_element.drain(last_sym_start..);
-                    out_element.push((sub_rule_id.try_into().unwrap(), Rules::RuleRef));
+                    out_element.push((Rules::RuleRef, sub_rule_id.try_into().unwrap()));
 
                     // move past the repetition character
                     self.input = &self.input[1..];
@@ -316,76 +335,76 @@ ws    ::= [ \t\n]*";
             ("ws_12", 12),
         ];
 
-        let mut expected_rules = vec![
-            (5, RuleRef),
-            (0, End),
-            (2, RuleRef),
-            (61, Char),
-            (3, RuleRef),
-            (4, RuleRef),
-            (10, Char),
-            (0, End),
-            (4, RuleRef),
-            (7, RuleRef),
-            (0, End),
-            (12, RuleRef),
-            (0, End),
-            (8, RuleRef),
-            (0, Alt),
-            (9, RuleRef),
-            (0, Alt),
-            (40, Char),
-            (3, RuleRef),
-            (2, RuleRef),
-            (41, Char),
-            (3, RuleRef),
-            (0, End),
-            (1, RuleRef),
-            (5, RuleRef),
-            (0, Alt),
-            (1, RuleRef),
-            (0, End),
-            (45, Char),
-            (43, Char),
-            (42, Char),
-            (47, Char),
-            (4, RuleRef),
-            (0, End),
-            (6, RuleRef),
-            (7, RuleRef),
-            (0, Alt),
-            (0, End),
-            (10, RuleRef),
-            (3, RuleRef),
-            (0, End),
-            (11, RuleRef),
-            (3, RuleRef),
-            (0, End),
-            (97, Char),
-            (45, Char),
-            (122, Char),
-            (97, Char),
-            (45, Char),
-            (122, Char),
-            (48, Char),
-            (57, Char),
-            (95, Char),
-            (10, RuleRef),
-            (0, Alt),
-            (0, End),
-            (48, Char),
-            (57, Char),
-            (11, RuleRef),
-            (0, Alt),
-            (48, Char),
-            (57, Char),
-            (0, End),
-            (32, Char),
-            (9, Char),
-            (10, Char),
-            (12, RuleRef),
-            (0, Alt),
-            (0, End),
+        let mut expected_rules: Vec<GrammarElement> = vec![
+            (RuleRef, 5),
+            (End, 0),
+            (RuleRef, 2),
+            (Char, 61),
+            (RuleRef, 3),
+            (RuleRef, 4),
+            (Char, 10),
+            (End, 0),
+            (RuleRef, 4),
+            (RuleRef, 7),
+            (End, 0),
+            (RuleRef, 12),
+            (End, 0),
+            (RuleRef, 8),
+            (Alt, 0),
+            (RuleRef, 9),
+            (Alt, 0),
+            (Char, 40),
+            (RuleRef, 3),
+            (RuleRef, 2),
+            (Char, 41),
+            (RuleRef, 3),
+            (End, 0),
+            (RuleRef, 1),
+            (RuleRef, 5),
+            (Alt, 0),
+            (RuleRef, 1),
+            (End, 0),
+            (Char, 45),
+            (Char, 43),
+            (Char, 42),
+            (Char, 47),
+            (RuleRef, 4),
+            (End, 0),
+            (RuleRef, 6),
+            (RuleRef, 7),
+            (Alt, 0),
+            (End, 0),
+            (RuleRef, 10),
+            (RuleRef, 3),
+            (End, 0),
+            (RuleRef, 11),
+            (RuleRef, 3),
+            (End, 0),
+            (Char, 97),
+            (Char, 45),
+            (Char, 122),
+            (Char, 97),
+            (Char, 45),
+            (Char, 122),
+            (Char, 48),
+            (Char, 57),
+            (Char, 95),
+            (RuleRef, 10),
+            (Alt, 0),
+            (End, 0),
+            (Char, 48),
+            (Char, 57),
+            (RuleRef, 11),
+            (Alt, 0),
+            (Char, 48),
+            (Char, 57),
+            (End, 0),
+            (Char, 32),
+            (Char, 9),
+            (Char, 10),
+            (RuleRef, 12),
+            (Alt, 0),
+            (End, 0),
         ];
 
         for (k, v) in &parser.symbol_ids {
