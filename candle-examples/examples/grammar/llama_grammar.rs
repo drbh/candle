@@ -33,7 +33,7 @@ impl LlamaGrammar {
         }
 
         let pos_index: usize = stack.len() - 1;
-        let pos: (Rules, u8) = stack[pos_index].clone();
+        let pos: (Rules, u8) = stack[pos_index];
 
         match pos.0 {
             Rules::RuleRef => {
@@ -46,13 +46,13 @@ impl LlamaGrammar {
 
                     if let Some(next_pos) = rules[last_index].get(last_pos_index + 1) {
                         if !LlamaGrammar::is_end_of_sequence(next_pos) {
-                            new_stack.push(next_pos.clone());
+                            new_stack.push(*next_pos);
                         }
                     }
 
                     if let Some(next_subpos) = subpos.get(idx) {
                         if !LlamaGrammar::is_end_of_sequence(next_subpos) {
-                            new_stack.push(next_subpos.clone());
+                            new_stack.push(*next_subpos);
                         }
                     }
 
@@ -84,7 +84,7 @@ impl LlamaGrammar {
         for rule in rules.iter() {
             let mut inner_vec = Vec::new();
             for pos in rule.iter().take_while(|&el| el.0 != Rules::End) {
-                inner_vec.push(pos.clone());
+                inner_vec.push(*pos);
             }
             inner_vec.push((Rules::End, 0));
             vec_rules.push(inner_vec);
@@ -93,13 +93,13 @@ impl LlamaGrammar {
         let mut stacks: Vec<Vec<(Rules, u8)>> = Vec::new();
         let first_index = &rules[start_rule_index];
         let mut count = 0;
-        let mut pos: (Rules, u8) = first_index[count].clone();
+        let mut pos: (Rules, u8) = first_index[count];
 
         while count <= first_index.len() {
             let mut stack = Vec::new();
 
             if !LlamaGrammar::is_end_of_sequence(&pos) {
-                stack.push(pos.clone());
+                stack.push(pos);
             }
 
             LlamaGrammar::advance_stack((0, 0), &vec_rules, &mut stack, &mut stacks);
@@ -108,7 +108,7 @@ impl LlamaGrammar {
                 count += 1;
 
                 if count < first_index.len() {
-                    pos = first_index[count].clone();
+                    pos = first_index[count];
                 } else {
                     break;
                 }
@@ -120,7 +120,7 @@ impl LlamaGrammar {
 
             if first_index[count].0 == Rules::Alt {
                 count += 1;
-                pos = first_index[count].clone();
+                pos = first_index[count];
             } else {
                 break;
             }
