@@ -520,7 +520,8 @@ fn pca(x: Tensor) -> Result<(Tensor, Tensor, Tensor)> {
         .collect::<Vec<f32>>();
 
     // convert back to tensor
-    let sorted_eigenvectors = Tensor::from_vec(sorted_eigenvectors, (4, 4), &x.device())?;
+    let sorted_eigenvectors =
+        Tensor::from_vec(sorted_eigenvectors, eigenvectors.dims2()?, &x.device())?;
 
     // Step 5: Transform the original matrix
     let transformed = standardized.matmul(&eigenvectors.t()?)?;
