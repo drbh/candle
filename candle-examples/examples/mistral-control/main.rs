@@ -397,41 +397,42 @@ struct Args {
     pca_to_control_vector: bool,
 }
 
-// TODO: cleanup and and validate calculations
 fn householder(x: Tensor) -> Result<(Tensor, Tensor)> {
     let m = x.dims1()?;
     let alpha = x.get(0)?;
-    let s = x.i(0..)?;
-    let sum_of_squares = s.clone().mul(&s)?;
-    let s = sum_of_squares.clone().sum_all()?;
-    let mut v = x.clone();
-    let s_value = s.clone().to_vec0::<f32>()?;
-    let mut tau = Tensor::from_slice(&[0.0f32], (1,), &Device::Cpu)?;
-    let v = if s_value == 0.0 {
-        Tensor::from_slice(&[0.0f32], (1,), &Device::Cpu)?
+    let s = x.sqr()?.sum_all()?;
+    let two = Tensor::from_slice(&[2.0f32], (), x.device())?;
+    // if s is 0 return v = 0 and tau = 0
+    let (v, tau) = if s.to_vec0::<f32>()? == 0.0 {
+        let tau = Tensor::zeros((1,), x.dtype(), x.device())?;
+        let v = Tensor::zeros((m,), x.dtype(), x.device())?;
+        (v, tau)
     } else {
-        let alpha_value = (alpha.clone() * alpha.clone())?;
-        let t = (alpha_value + s.clone())?.sqrt()?;
+        let t = alpha.sqr()?.add(&s)?.sqrt()?;
         let alpha_le_zero_value = alpha.to_vec0::<f32>()?;
+
         let v0 = if alpha_le_zero_value == 1.0 {
             (alpha - t.clone())?
         } else {
             s.neg()?.clone().div(&(alpha + t.clone())?)?
         };
-        let v_value = v0.to_vec0::<f32>()?;
-        let v0_squared = v0.clone().mul(&v0)?;
-        let _two = Tensor::from_slice(&[2.0f32], (1,), &Device::Cpu)?;
-        let tau_nom = (v0_squared.clone() + v0_squared.clone())?;
-        let tau_denom = s.clone().add(&v0_squared)?;
-        tau = tau_nom.clone().div(&tau_denom)?;
-        let _tau_value = tau.to_vec0::<f32>()?;
-        v = v.slice_assign(
-            &[0..1],
-            &Tensor::from_slice(&[v_value], (1,), &Device::Cpu)?,
-        )?;
-
-        v.div(&v0.repeat((m,))?)?
+        let v0_sqr = v0.sqr()?;
+        let tau = two.mul(&v0_sqr)?.div(&s.add(&v0_sqr)?)?;
+        let v = x.slice_assign(&[0..1], &v0.unsqueeze(0)?)?;
+        (v.div(&v0.repeat((m,))?)?, tau)
     };
+    Ok((v, tau))
+}
+
+// aligned with the numpy implementation
+fn householder_vectorized(x: Tensor) -> Result<(Tensor, Tensor)> {
+    let linalg_norm_a = x.sqr()?.sum_all()?.sqrt()?;
+    let a0 = x.get(0)?;
+    let a0_plus_norm = a0.add(&linalg_norm_a)?;
+    let v = x.div(&a0_plus_norm.repeat((x.dims1()?,))?)?;
+    let v = v.slice_assign(&[0..1], &Tensor::from_slice(&[1.0f32], (1,), x.device())?)?;
+    let v_sum = v.sqr()?.sum_all()?;
+    let tau = Tensor::from_slice(&[2.0f32], (), x.device())?.div(&v_sum)?;
     Ok((v, tau))
 }
 
@@ -444,7 +445,7 @@ fn qr_decomposition(A: Tensor) -> Result<(Tensor, Tensor)> {
     for j in 0..n {
         let r_slice = R.i((j..m, j..j + 1))?;
         let r_slice_flat = r_slice.flatten(0, 1)?;
-        let (v, tau) = householder(r_slice_flat)?;
+        let (v, tau) = householder_vectorized(r_slice_flat)?;
         let h = Tensor::eye(m, DType::F32, &Device::Cpu)?;
         let empty_v = v.clone().reshape((1, m - j))?.repeat((m - j, 1))?;
         let v_t = empty_v.t()?;
@@ -460,27 +461,71 @@ fn qr_decomposition(A: Tensor) -> Result<(Tensor, Tensor)> {
     Ok((Q.i((0..n, 0..m))?.t()?, R))
 }
 
+fn eigen_qr_simple(x: Tensor) -> Result<(Tensor, Tensor)> {
+    let iterations = 200;
+    let mut Ak = x.clone();
+    let n = x.dims()[0];
+    let mut QQ = Tensor::eye(n, x.dtype(), &x.device())?;
+    for _ in 0..iterations {
+        let (Q, R) = qr_decomposition(Ak.clone())?;
+        Ak = R.matmul(&Q)?;
+        QQ = QQ.matmul(&Q)?;
+    }
+    // zero non-diagonal elements
+    let indexes = Tensor::eye(n, x.dtype(), &x.device())?;
+    // TODO: use a more efficient method reduce the matrix to its diagonal elements
+    // sum across the first dimension to get the diagonal elements
+    let E = Ak.mul(&indexes)?.sum(0)?;
+    Ok((E, QQ))
+}
+
 // TODO: cleanup and and validate calculations
-fn pca(x: Tensor) -> Result<(Tensor, Tensor)> {
+fn pca(x: Tensor) -> Result<(Tensor, Tensor, Tensor)> {
+    // Step 1: Standardize the dataset
     let mean = x.mean(0)?;
     let mean_centered = x.sub(&mean.repeat((x.dims()[0], 1))?)?;
-    let std = x.var(0)?.sqrt()?;
-    let standardized = mean_centered.broadcast_div(&std)?;
+    let standardized = mean_centered;
+
+    // Step 2: Compute the covariance matrix
     let cov = standardized.t()?.matmul(&standardized)?;
     let cov = cov.broadcast_div(&Tensor::from_slice(
         &[standardized.dims()[0] as f32 - 1.0f32],
         (1,),
         &Device::Cpu,
     )?)?;
-    let iterations = 1;
-    let mut q_matrix = Tensor::eye(4, DType::F32, &Device::Cpu)?;
-    let mut A = cov.clone();
-    for _i in 0..iterations {
-        let (Q, R) = qr_decomposition(A.clone())?;
-        A = R.matmul(&Q.t()?)?;
-        q_matrix = q_matrix.matmul(&Q.t()?)?;
-    }
-    Ok((A, q_matrix))
+
+    // Step 3: Compute the eigenvalues and eigenvectors
+    let (eigenvalues, eigenvectors) = eigen_qr_simple(cov)?;
+
+    // Step 4: Sort the eigenvectors by decreasing eigenvalues
+    let mut sorted_eigenvalues = eigenvalues.to_vec1::<f32>()?;
+    let mut argsort_indices: Vec<_> = (0..sorted_eigenvalues.len()).collect();
+    argsort_indices.sort_by(|&i, &j| {
+        sorted_eigenvalues[j]
+            .partial_cmp(&sorted_eigenvalues[i])
+            .unwrap()
+    });
+
+    // use the values to sort the vectors
+    let mut sorted_eigenvectors = eigenvectors.to_vec2::<f32>()?;
+    let mut sorted_eigenvectors = argsort_indices
+        .iter()
+        .map(|&i| sorted_eigenvectors[i].clone())
+        .collect::<Vec<_>>();
+
+    let sorted_eigenvectors = sorted_eigenvectors
+        .iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<f32>>();
+
+    // convert back to tensor
+    let sorted_eigenvectors = Tensor::from_vec(sorted_eigenvectors, (4, 4), &x.device())?;
+
+    // Step 5: Transform the original matrix
+    let transformed = standardized.matmul(&eigenvectors.t()?)?;
+
+    Ok((transformed, eigenvalues, sorted_eigenvectors.t()?))
 }
 
 // TODO:
@@ -518,19 +563,42 @@ fn main() -> Result<()> {
     let mut sample_len = args.sample_len;
 
     if args.pca_to_control_vector {
-        let (eigenvalues, eigenvectors) = pca(Tensor::from_slice(
+        let (_transformed, _eigenvalues, eigenvectors) = pca(Tensor::from_slice(
             &[
                 1., 2., 2., 3., //
                 3., 4., 4., 5., //
                 5., 6., 1., 0., //
-                2., 1., 3., 2., //
-                4., 3., 5., 4.0f32,
+                2., 1., 3., 2.0f32,
             ],
-            (5, 4),
+            (4, 4),
             &Device::Cpu,
         )?)?;
-        println!("eigenvalues: {:?}", eigenvalues.to_vec2::<f32>()?);
-        println!("eigenvectors: {:?}", eigenvectors.to_vec2::<f32>()?);
+
+        let eigenvectors = eigenvectors.to_vec2::<f32>()?;
+
+        // only print the first two vectors
+        for vec in eigenvectors.iter().take(2) {
+            println!("{:?}", vec);
+        }
+        // [0.5093906, 0.62907666, -0.30034626, -0.5045552]
+        // [0.26052827, 0.5371797, 0.38106996, 0.7059383]
+
+        // COMPARED TO PYTHON
+        //
+        // # Given tensor
+        // tensor = np.array([
+        //     [1.0, 2.0, 2.0, 3.0],
+        //     [3.0, 4.0, 4.0, 5.0],
+        //     [5.0, 6.0, 1.0, 0.0],
+        //     [2.0, 1.0, 3.0, 2.0],
+        // ])
+
+        // pca = PCA(n_components=2, power_iteration_normalizer="QR", svd_solver="full")
+        // pca.fit(tensor)
+        // print(pca.components_)
+        // [[ 0.50939062  0.6290765  -0.30034636 -0.50455527]
+        //  [ 0.26052823  0.53717973  0.38106995  0.70593815]]
+
         return Ok(());
     }
 
