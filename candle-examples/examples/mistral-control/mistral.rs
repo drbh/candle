@@ -1,23 +1,23 @@
-use crate::models::with_tracing::{linear_no_bias, Linear};
 /// Mistral LLM, https://github.com/mistralai/mistral-src
 use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, VarBuilder};
+use candle_transformers::models::with_tracing::{linear_no_bias, Linear};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
-    pub(crate) vocab_size: usize,
-    pub(crate) hidden_size: usize,
-    pub(crate) intermediate_size: usize,
-    pub(crate) num_hidden_layers: usize,
-    pub(crate) num_attention_heads: usize,
-    pub(crate) num_key_value_heads: usize,
-    pub(crate) hidden_act: Activation,
-    pub(crate) max_position_embeddings: usize,
-    pub(crate) rms_norm_eps: f64,
-    pub(crate) rope_theta: f64,
-    pub(crate) sliding_window: usize,
-    pub(crate) use_flash_attn: bool,
+    pub vocab_size: usize,
+    pub hidden_size: usize,
+    pub intermediate_size: usize,
+    pub num_hidden_layers: usize,
+    pub num_attention_heads: usize,
+    pub num_key_value_heads: usize,
+    pub hidden_act: Activation,
+    pub max_position_embeddings: usize,
+    pub rms_norm_eps: f64,
+    pub rope_theta: f64,
+    pub sliding_window: usize,
+    pub use_flash_attn: bool,
 }
 
 impl Config {
@@ -78,13 +78,13 @@ impl Config {
 }
 
 #[derive(Debug, Clone)]
-struct RmsNorm {
+pub struct RmsNorm {
     inner: candle_nn::RmsNorm,
     span: tracing::Span,
 }
 
 impl RmsNorm {
-    fn new(size: usize, eps: f64, vb: VarBuilder) -> Result<Self> {
+    pub fn new(size: usize, eps: f64, vb: VarBuilder) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "rms-norm");
         let inner = candle_nn::rms_norm(size, eps, vb)?;
         Ok(Self { inner, span })
@@ -99,7 +99,7 @@ impl Module for RmsNorm {
 }
 
 #[derive(Debug, Clone)]
-struct RotaryEmbedding {
+pub struct RotaryEmbedding {
     sin: Tensor,
     cos: Tensor,
 }
@@ -112,7 +112,7 @@ fn rotate_half(xs: &Tensor) -> Result<Tensor> {
 }
 
 impl RotaryEmbedding {
-    fn new(dtype: DType, cfg: &Config, dev: &Device) -> Result<Self> {
+    pub fn new(dtype: DType, cfg: &Config, dev: &Device) -> Result<Self> {
         let dim = cfg.hidden_size / cfg.num_attention_heads;
         let max_seq_len = cfg.max_position_embeddings;
         let inv_freq: Vec<_> = (0..dim)
@@ -322,7 +322,7 @@ impl Attention {
 }
 
 #[derive(Debug, Clone)]
-struct DecoderLayer {
+pub struct DecoderLayer {
     self_attn: Attention,
     mlp: MLP,
     input_layernorm: RmsNorm,
@@ -330,7 +330,7 @@ struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    pub fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"))?;
         let mlp = MLP::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
@@ -348,7 +348,7 @@ impl DecoderLayer {
         })
     }
 
-    fn forward(
+    pub fn forward(
         &mut self,
         xs: &Tensor,
         attention_mask: Option<&Tensor>,
@@ -363,7 +363,7 @@ impl DecoderLayer {
         residual + xs
     }
 
-    fn clear_kv_cache(&mut self) {
+    pub fn clear_kv_cache(&mut self) {
         self.self_attn.clear_kv_cache()
     }
 }

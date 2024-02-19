@@ -9,8 +9,11 @@ extern crate accelerate_src;
 use anyhow::{Error as E, Result};
 use clap::Parser;
 
-use candle_transformers::models::mistral::Config;
-use candle_transformers::models::mistral::{DecoderLayer, RmsNorm, RotaryEmbedding};
+mod mistral;
+
+use mistral::Config;
+use mistral::{DecoderLayer, RmsNorm, RotaryEmbedding};
+
 use candle_transformers::models::with_tracing::{linear_no_bias, Linear};
 
 use candle::IndexOp;
